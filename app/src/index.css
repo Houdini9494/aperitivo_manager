@@ -1,0 +1,599 @@
+:root {
+  /* Brand Colors extracted from Panificio '900 Logo */
+  --color-brand-dark: #3E3228;
+  /* Dark Chocolate Brown */
+  --color-brand-gold: #FDB833;
+  /* Golden Yellow */
+  --color-brand-cream: #FAF8F5;
+  /* Off-white Cream */
+
+  --color-bg: var(--color-brand-cream);
+  --color-surface: #ffffff;
+
+  --color-primary: var(--color-brand-dark);
+  /* Main text color */
+  --color-secondary: #6B5D54;
+  /* Muted brown for secondary text */
+  --color-accent: var(--color-brand-gold);
+  /* Buttons/Highlights */
+
+  /* Status Colors */
+  --table-free: #ECFDF5;
+  --table-free-border: #10B981;
+
+  --table-occupied: #FEF2F2;
+  --table-occupied-border: #EF4444;
+
+  --font-base: 'Inter', system-ui, sans-serif;
+  --radius-md: 12px;
+  --shadow-sm: 0 1px 2px 0 rgb(62 50 40 / 0.05);
+  --shadow-lg: 0 10px 15px -3px rgb(62 50 40 / 0.1);
+
+  --spacing-xs: 4px;
+  --spacing-sm: 8px;
+  --spacing-md: 16px;
+  --spacing-lg: 24px;
+}
+
+body {
+  margin: 0;
+  font-family: var(--font-base);
+  background-color: var(--color-bg);
+  color: var(--color-primary);
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Layout */
+.app-container {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  overflow: hidden;
+  background-color: var(--color-bg);
+}
+
+.app-header {
+  background-color: var(--color-brand-dark);
+  border-bottom: 2px solid var(--color-brand-gold);
+  padding: 8px 16px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  box-shadow: var(--shadow-lg);
+  z-index: 10;
+  color: white;
+  gap: 20px;
+}
+
+/* Visibility Utilities - CRITICAL for responsive switch */
+.desktop-only {
+  display: flex !important;
+}
+
+.mobile-only {
+  display: none !important;
+}
+
+@media (max-width: 768px) {
+  .desktop-only {
+    display: none !important;
+  }
+
+  .mobile-only {
+    display: flex !important;
+  }
+}
+
+/* Logo Styling - Remove white box */
+.header-logo {
+  height: 50px;
+  width: 50px;
+  border-radius: 50%;
+  /* Make round */
+  object-fit: contain;
+  /* Ensure image fits */
+  background-color: white;
+  /* Ensure visible on dark header */
+  /* Better: Just round it and border it. */
+  border: 2px solid var(--color-brand-gold);
+}
+
+/* Buttons Styling */
+.btn-primary {
+  background-color: var(--color-brand-gold);
+  color: var(--color-brand-dark);
+  border: none;
+  font-weight: 700;
+  border-radius: 8px;
+  padding: 8px 16px;
+  cursor: pointer;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+  transition: transform 0.1s;
+}
+
+.btn-primary:active {
+  transform: scale(0.98);
+}
+
+/* Room Toggle Styling */
+.room-toggle {
+  background-color: rgba(0, 0, 0, 0.3);
+  /* Darker background for toggle track */
+  padding: 4px;
+  border-radius: 12px;
+  display: flex;
+  gap: 4px;
+}
+
+/* Room Toggle Buttons */
+.toggle-btn {
+  background: transparent;
+  color: rgba(255, 255, 255, 0.7);
+  border: none;
+  padding: 6px 12px;
+  border-radius: 8px;
+  cursor: pointer;
+  font-weight: 500;
+  transition: all 0.2s;
+}
+
+.toggle-btn.active {
+  background-color: var(--color-brand-gold);
+  color: var(--color-brand-dark);
+  /* Contrast text */
+  font-weight: 700;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+}
+
+/* Date Input Styling */
+.date-input {
+  background-color: rgba(255, 255, 255, 0.1);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  color: white;
+  border-radius: 8px;
+  padding: 6px 12px;
+}
+
+/* Switch Toggle */
+.switch {
+  position: relative;
+  display: inline-block;
+  width: 40px;
+  height: 24px;
+}
+
+.switch input {
+  opacity: 0;
+  width: 0;
+  height: 0;
+}
+
+.slider {
+  position: absolute;
+  cursor: pointer;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background-color: #ccc;
+  -webkit-transition: .4s;
+  transition: .4s;
+}
+
+.slider:before {
+  position: absolute;
+  content: "";
+  height: 16px;
+  width: 16px;
+  left: 4px;
+  bottom: 4px;
+  background-color: white;
+  -webkit-transition: .4s;
+  transition: .4s;
+}
+
+input:checked+.slider {
+  background-color: #2196F3;
+}
+
+input:focus+.slider {
+  box-shadow: 0 0 1px #2196F3;
+}
+
+input:checked+.slider:before {
+  -webkit-transform: translateX(16px);
+  -ms-transform: translateX(16px);
+  transform: translateX(16px);
+}
+
+/* Rounded sliders */
+.slider.round {
+  border-radius: 24px;
+}
+
+.slider.round:before {
+  border-radius: 50%;
+}
+
+
+/* Desktop: Row layout */
+@media (min-width: 769px) {
+  .app-header {
+    flex-direction: row;
+    gap: 24px;
+  }
+
+  .header-top-row {
+    display: flex;
+    align-items: center;
+    gap: 20px;
+  }
+
+  .header-bottom-row {
+    display: flex;
+    align-items: center;
+    gap: 20px;
+  }
+
+  .date-input {
+    width: auto;
+  }
+
+  .header-title {
+    font-size: 1.5rem;
+    font-weight: 700;
+    color: var(--color-brand-gold);
+    margin: 0;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-left: 12px;
+  }
+}
+
+/* Mobile: Column layout */
+@media (max-width: 768px) {
+  .app-header {
+    flex-direction: column;
+    align-items: stretch;
+    padding: 8px 12px;
+    gap: 12px;
+    height: auto;
+  }
+
+  .header-top-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    width: 100%;
+    margin-bottom: 0;
+  }
+
+  .header-bottom-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    width: 100%;
+    gap: 8px;
+  }
+
+  .header-brand {
+    flex: 0 0 auto;
+    display: flex;
+    align-items: center;
+  }
+
+  /* Ensure logo is small on mobile */
+  .header-logo {
+    height: 36px;
+    width: 36px;
+  }
+
+  .header-title {
+    display: none;
+    /* Hide on mobile */
+  }
+
+  .date-group {
+    flex: 1;
+    display: flex;
+    justify-content: center;
+    padding: 0 8px;
+  }
+
+  .date-input {
+    width: 100%;
+    text-align: center;
+    padding: 6px;
+  }
+
+  /* Room Toggle - Fill space */
+  .room-toggle {
+    flex: 1;
+  }
+
+  /* Sidebar adjustments */
+  .sidebar-container {
+    width: 100%;
+    max-width: 100%;
+  }
+
+  .main-content.sidebar-open {
+    margin-right: 0;
+    /* Don't shift content on mobile */
+  }
+
+  /* Sidebar content stacking */
+  .sidebar-content {
+    flex-direction: column;
+    padding: 16px;
+  }
+
+  .sidebar-col-left {
+    border-right: none;
+    border-bottom: 1px solid #e5e7eb;
+    padding-right: 0;
+    padding-bottom: 24px;
+    flex: none;
+    /* Auto height */
+    max-height: 50vh;
+    /* Limit height if needed */
+  }
+
+  .sidebar-col-right {
+    width: 100%;
+    padding-top: 16px;
+  }
+
+  /* Table Editor specific mobile tweak */
+  .table-editor-panel {
+    position: fixed;
+    top: 50% !important;
+    left: 50% !important;
+    right: auto !important;
+    transform: translate(-50%, -50%);
+    width: 90% !important;
+    max-width: 320px;
+    z-index: 1000;
+  }
+}
+
+.header-title {
+  font-size: 1rem;
+  margin-left: 6px;
+  display: inline-block;
+}
+
+/* Logout: Absolute top right or flex */
+.header-controls {
+  display: contents;
+  /* Still useful to unwrap */
+}
+
+/* --- RESTORED STYLES FOR SIDEBAR & MODAL --- */
+
+/* Modal */
+.modal-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background-color: rgba(62, 50, 40, 0.7);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 99999;
+  backdrop-filter: blur(2px);
+}
+
+.modal-content {
+  background-color: white;
+  border-radius: 12px;
+  padding: 24px;
+  width: 100%;
+  max-width: 500px;
+  box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1);
+}
+
+.form-group {
+  margin-bottom: 16px;
+}
+
+.form-label {
+  display: block;
+  font-size: 0.875rem;
+  font-weight: 500;
+  margin-bottom: 4px;
+}
+
+.form-input {
+  width: 100%;
+  padding: 8px;
+  border: 1px solid #d1d5db;
+  border-radius: 6px;
+  box-sizing: border-box;
+}
+
+/* Sidebar Animation & Layout */
+.sidebar-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background-color: rgba(0, 0, 0, 0.3);
+  z-index: 40;
+}
+
+.sidebar-container {
+  position: fixed;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: 600px;
+  max-width: 90vw;
+  background-color: white;
+  box-shadow: -4px 0 15px rgba(0, 0, 0, 0.1);
+  transform: translateX(100%);
+  transition: transform 0.3s ease-in-out;
+  z-index: 50;
+  display: flex;
+  flex-direction: column;
+  box-sizing: border-box;
+}
+
+.sidebar-container.open {
+  transform: translateX(0);
+}
+
+.sidebar-close-btn {
+  position: absolute;
+  top: 16px;
+  right: 16px;
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  padding: 8px;
+  color: #6b7280;
+  border-radius: 50%;
+  transition: background-color 0.2s;
+  z-index: 60;
+}
+
+.sidebar-close-btn:hover {
+  background-color: #f3f4f6;
+}
+
+.sidebar-content {
+  flex: 1;
+  display: flex;
+  padding: 24px;
+  gap: 24px;
+  overflow: hidden;
+}
+
+.main-content {
+  flex: 1;
+  padding: var(--spacing-lg);
+  overflow: auto;
+  position: relative;
+  background-image: radial-gradient(var(--color-secondary) 1px, transparent 1px);
+  background-size: 20px 20px;
+  background-color: var(--color-bg);
+  opacity: 0.9;
+  transition: margin-right 0.3s ease-in-out;
+}
+
+.main-content.sidebar-open {
+  margin-right: 600px;
+}
+
+
+/* Default Sidebar Layout (Desktop) */
+.sidebar-col-left {
+  flex: 1.2;
+  display: flex;
+  flex-direction: column;
+  border-right: 1px solid #e5e7eb;
+  padding-right: 24px;
+  overflow-y: auto;
+}
+
+.sidebar-col-right {
+  width: 260px;
+  flex-shrink: 0;
+  padding-top: 0;
+}
+
+.section-title {
+  font-size: 1.25rem;
+  font-weight: 700;
+  color: #1f2937;
+  margin-bottom: 16px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.reservation-card {
+  background-color: #f9fafb;
+  border-left: 4px solid #3b82f6;
+  padding: 12px;
+  border-top-right-radius: 8px;
+  border-bottom-right-radius: 8px;
+  margin-bottom: 12px;
+}
+
+.res-header {
+  display: flex;
+  justify-content: space-between;
+}
+
+.res-time {
+  font-weight: 700;
+  color: #1e3a8a;
+}
+
+.res-name {
+  font-weight: 600;
+}
+
+.action-btn {
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 4px;
+}
+
+.action-btn.edit {
+  color: #2563eb;
+}
+
+.action-btn.delete {
+  color: #dc2626;
+}
+
+/* Table Info sidebar styles */
+.table-title {
+  font-size: 1.5rem;
+  font-weight: 700;
+  margin-bottom: 16px;
+}
+
+.info-row {
+  display: flex;
+  align-items: center;
+  margin-bottom: 12px;
+  gap: 8px;
+}
+
+.status-badge {
+  padding: 4px 12px;
+  border-radius: 999px;
+  font-weight: 600;
+  font-size: 0.9rem;
+}
+
+.status-badge.occupied {
+  background-color: #fee2e2;
+  color: #991b1b;
+}
+
+.status-badge.free {
+  background-color: #dcfce7;
+  color: #166534;
+}
+
+.add-res-btn {
+  width: 100%;
+  padding: 10px;
+  background-color: white;
+  border: 2px dashed #93c5fd;
+  color: #2563eb;
+  border-radius: 8px;
+  cursor: pointer;
+  display: flex;
+  justify-content: center;
+  gap: 8px;
+}

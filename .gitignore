@@ -1,0 +1,55 @@
+# System Files
+.DS_Store
+Thumbs.db
+
+# Logs
+logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+pnpm-debug.log*
+
+# Dependencies
+node_modules/
+.pnp
+.pnp.js
+
+# Build Output
+dist/
+build/
+out/
+.next/
+
+# Documentation & Analysis (Local only)
+*.txt
+ANALISI_TECNICA_SICUREZZA.md
+idea-app-telamonio.txt
+Analisi requisiti telamonio app.txt
+ISTRUZIONI.txt
+
+# Environment Variables - CRITICAL: Never commit these!
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+*.env
+*.env.*
+
+# Keep the example file
+!.env.example
+
+# IDEs
+.vscode/*
+!.vscode/extensions.json
+.idea/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+
+# Testing
+coverage/
+
+# Misc
+.vercel
