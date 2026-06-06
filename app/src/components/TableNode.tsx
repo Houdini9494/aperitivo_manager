@@ -1,10 +1,5 @@
 import React from 'react';
 import type { Table, Reservation } from '../types';
-// I installed 'clsx'?? Let me check my previous command. 
-// "npm install ... clsx tailwind-merge" - NO! I said "Avoid using TailwindCSS ... So I will SKIP tailwind-merge and clsx". 
-// But in the Thought process, I said "I will SKIP tailwind-merge... or just clsx".
-// I did NOT install clsx. I passed "react-router-dom ... date-fns uuid".
-// So I cannot use clsx. I will use template literals.
 
 interface TableNodeProps {
     table: Table;
@@ -57,14 +52,15 @@ export const TableNode: React.FC<TableNodeProps> = ({ table, reservations, onCli
                         onStatusToggle(e); // Pass the event as per prop definition
                     }}
                     style={{
-                        fontSize: '10px',
-                        padding: '2px 4px',
+                        fontSize: '12px',
+                        fontWeight: 600,
+                        padding: '6px 4px',
+                        minHeight: '28px', // Target touch più comodo durante il servizio
                         background: 'white',
                         border: '1px solid #ccc',
                         borderRadius: '4px',
                         cursor: 'pointer',
-                        width: '100%', // Make button full width for easier clicking? Or just auto? User said "manda a capo".
-                        // specific request: "manda direttamente il bottone a capo"
+                        width: '100%',
                     }}
                 >
                     {isOccupied ? 'LIBERA' : 'OCCUPA'}

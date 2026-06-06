@@ -30,6 +30,7 @@ export const MapView: React.FC<MapViewProps> = ({
     isEditingLayout = false
 }) => {
     const containerRef = useRef<HTMLDivElement>(null);
+    const canvasRef = useRef<HTMLDivElement>(null); // Il canvas 1200x800 scalato da zoom
     const [draggingTableId, setDraggingTableId] = useState<string | null>(null);
     const [dragOffset, setDragOffset] = useState({ x: 0, y: 0 });
     const [zoom, setZoom] = useState(1);
@@ -60,13 +61,13 @@ export const MapView: React.FC<MapViewProps> = ({
         e.preventDefault(); // Prevent text selection/scrolling
         e.stopPropagation(); // Let it bubble if needed? Better to stop to prevent map panning if we had it.
 
-        const container = containerRef.current;
-        if (!container) return;
+        const canvas = canvasRef.current;
+        if (!canvas) return;
 
-        const rect = container.getBoundingClientRect();
-        // Offset relative to table top-left
-        const offsetX = e.clientX - rect.left - table.x;
-        const offsetY = e.clientY - rect.top - table.y;
+        const rect = canvas.getBoundingClientRect();
+        // Offset in coordinate del canvas (non scalate): dividiamo per zoom (item 11)
+        const offsetX = (e.clientX - rect.left) / zoom - table.x;
+        const offsetY = (e.clientY - rect.top) / zoom - table.y;
 
         setDraggingTableId(table.id);
         setDragOffset({ x: offsetX, y: offsetY });
@@ -74,31 +75,8 @@ export const MapView: React.FC<MapViewProps> = ({
         setIsDragging(false); // Reset drag flag
     };
 
-    const handlePointerMove = (e: React.PointerEvent) => {
-        if (!draggingTableId || !containerRef.current) return;
-        if (!isEditingLayout) return; // Prevent dragging if not editing layout
-        e.preventDefault();
-
-        const rect = containerRef.current.getBoundingClientRect();
-        const x = e.clientX - rect.left - dragOffset.x;
-        const y = e.clientY - rect.top - dragOffset.y;
-
-        // Grid snapping (optional? 10px)
-        const snappedX = Math.round(x / 10) * 10;
-        const snappedY = Math.round(y / 10) * 10;
-
-        // Check if pointer has moved significantly to consider it a drag
-        if (initialPointerDownPos) {
-            const dx = e.clientX - initialPointerDownPos.x;
-            const dy = e.clientY - initialPointerDownPos.y;
-            const distance = Math.sqrt(dx * dx + dy * dy);
-            if (distance > 5) { // Threshold for drag (e.g., 5 pixels)
-                setIsDragging(true);
-            }
-        }
-
-        onTableMove(draggingTableId, snappedX, snappedY);
-    };
+    // Lo spostamento durante il drag è gestito da un unico listener su window
+    // (vedi useEffect più sotto), per evitare aggiornamenti doppi (item 11).
 
     const handleTablePointerUp = (e: React.PointerEvent, table: Table) => {
         // e.stopPropagation(); 
@@ -198,11 +176,12 @@ export const MapView: React.FC<MapViewProps> = ({
             }
         };
         const handleWindowPointerMove = (e: PointerEvent) => {
-            if (!draggingTableId || !containerRef.current) return;
+            if (!draggingTableId || !canvasRef.current) return;
 
-            const rect = containerRef.current.getBoundingClientRect();
-            const x = e.clientX - rect.left - dragOffset.x;
-            const y = e.clientY - rect.top - dragOffset.y;
+            const rect = canvasRef.current.getBoundingClientRect();
+            // Coordinate in spazio canvas (non scalato): dividi per zoom (item 11)
+            const x = (e.clientX - rect.left) / zoom - dragOffset.x;
+            const y = (e.clientY - rect.top) / zoom - dragOffset.y;
 
             const snappedX = Math.round(x / 10) * 10;
             const snappedY = Math.round(y / 10) * 10;
@@ -229,7 +208,7 @@ export const MapView: React.FC<MapViewProps> = ({
             window.removeEventListener('pointerup', handleWindowPointerUp);
             window.removeEventListener('pointermove', handleWindowPointerMove);
         };
-    }, [draggingTableId, dragOffset, initialPointerDownPos, onTableMove]); // Re-bind when dragging starts or initial pos changes
+    }, [draggingTableId, dragOffset, initialPointerDownPos, onTableMove, zoom]); // Re-bind when dragging starts or initial pos changes
 
     // Prevent default gesture behaviors on the container to allow custom zoom
     useEffect(() => {
@@ -267,14 +246,13 @@ export const MapView: React.FC<MapViewProps> = ({
                 placeItems: 'center',     // Center content
                 touchAction: 'pan-x pan-y' // Allow native scrolling, but we handle pinch via JS
             }}
-            onPointerMove={handlePointerMove} // Attach to container for general move detection
             onPointerUp={handleContainerPointerUp} // Attach to container for general up detection
             onWheel={handleWheel}
             onTouchStart={handleTouchStart}
             onTouchMove={handleTouchMove}
             onTouchEnd={handleTouchEnd}
         >
-            <div style={{
+            <div ref={canvasRef} style={{
                 width: '1200px', // Reduced from 2000px
                 height: '800px', // Reduced from 2000px
                 transform: `scale(${zoom})`,

@@ -8,22 +8,23 @@ export default defineConfig({
     react(),
     VitePWA({
       registerType: 'autoUpdate',
-      includeAssets: ['favicon.ico', 'apple-touch-icon.png', 'masked-icon.svg'],
+      includeAssets: ['logo.jpg'],
       manifest: {
         name: 'Aperitivo Manager',
         short_name: 'Aperitivo',
         description: 'Gestione operativa tavoli e prenotazioni',
         theme_color: '#ffffff',
+        // Usa il logo esistente come icona finché non si generano i PNG dedicati.
         icons: [
           {
-            src: 'pwa-192x192.png',
+            src: 'logo.jpg',
             sizes: '192x192',
-            type: 'image/png'
+            type: 'image/jpeg'
           },
           {
-            src: 'pwa-512x512.png',
+            src: 'logo.jpg',
             sizes: '512x512',
-            type: 'image/png'
+            type: 'image/jpeg'
           }
         ]
       },

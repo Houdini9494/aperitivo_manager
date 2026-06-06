@@ -1,4 +1,5 @@
-import { createContext, useContext, useEffect, useState, ReactNode } from 'react';
+import { createContext, useContext, useEffect, useState } from 'react';
+import type { ReactNode } from 'react';
 import type { User, Session } from '@supabase/supabase-js';
 import { supabase } from '../services/supabase';
 
@@ -9,12 +10,15 @@ interface AuthContextType {
     session: Session | null;
     role: UserRole;
     loading: boolean;
-    signIn: (email: string) => Promise<{ error: any }>;
     signOut: () => Promise<void>;
     isAdmin: boolean;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
+
+// Se la query del ruolo non risponde entro questo tempo (rete del locale ballerina),
+// procediamo comunque come 'staff' invece di restare bloccati sul loader (item 12).
+const ROLE_FETCH_TIMEOUT_MS = 5000;
 
 export function AuthProvider({ children }: { children: ReactNode }) {
     const [user, setUser] = useState<User | null>(null);
@@ -51,34 +55,31 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
     const fetchUserRole = async (userId: string) => {
         try {
-            const { data, error } = await supabase
+            const query = supabase
                 .from('profiles')
                 .select('role')
                 .eq('id', userId)
                 .single();
 
+            // Timeout di sicurezza: se la rete è lenta, non blocchiamo l'app.
+            const timeout = new Promise<never>((_, reject) =>
+                setTimeout(() => reject(new Error('role-timeout')), ROLE_FETCH_TIMEOUT_MS)
+            );
+
+            const { data, error } = await Promise.race([query, timeout]) as Awaited<typeof query>;
+
             if (error) {
                 console.error('Error fetching role:', error);
-                // Fallback or retry? For now assume staff if error or no profile
-                setRole('staff');
+                setRole('staff'); // Fallback degradato
             } else {
                 setRole(data?.role as UserRole);
             }
         } catch (e) {
-            console.error('Exception fetching role:', e);
-            setRole('staff');
+            console.error('Exception/timeout fetching role:', e);
+            setRole('staff'); // Procedi come staff invece di restare bloccato
         } finally {
             setLoading(false);
         }
-    };
-
-    const signIn = async (email: string) => {
-        // For this MVP we act as a "Magic Link" or Password login?
-        // Implementation Plan mentions Email/Password form.
-        // We will actually implement this in the Login component directly, 
-        // or expose a wrapper here. Use Supabase directly in component is fine for SignIn.
-        // Let's just expose a dummy helper or nothing.
-        return { error: 'Use supabase.auth.signInWithPassword directly' };
     };
 
     const signOut = async () => {
@@ -93,7 +94,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         session,
         role,
         loading,
-        signIn,
         signOut,
         isAdmin: role === 'admin'
     };

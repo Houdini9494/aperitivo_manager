@@ -29,24 +29,24 @@ function App() {
       // Wait 3 seconds to ensure connection is solid before syncing
       setTimeout(() => {
         console.log("Executing Auto-Sync...");
-        StorageService.syncPendingChanges(date);
+        StorageService.syncPendingChanges();
       }, 3000);
     };
 
     window.addEventListener('online', handleOnline);
     return () => window.removeEventListener('online', handleOnline);
-  }, [date]); // Re-bind if date changes so we sync relevant date
+  }, []);
 
   // New State for features
   const [editingReservation, setEditingReservation] = useState<any | null>(null);
   const [preSelectedTableId, setPreSelectedTableId] = useState<string | null>(null);
   const [isEditingLayout, setIsEditingLayout] = useState(false);
 
-  const { tables, updateTableStatus, updateTablePosition, loading: loadingTables, saveTables } = useLayout(date);
+  const { tables, updateTableStatus, updateTablePosition, loading: loadingTables, saveTable, deleteTable } = useLayout(date, isAdmin);
   const { reservations, addReservation, updateReservation, deleteReservation, loading: loadingRes } = useReservations(date);
 
   if (loading) {
-    return <div className="app-container" style={{ justifyContent: 'center', alignItems: 'center' }}>Loading Auth...</div>;
+    return <div className="app-container" style={{ justifyContent: 'center', alignItems: 'center' }}>Autenticazione…</div>;
   }
 
   if (!user) {
@@ -80,20 +80,23 @@ function App() {
   };
 
   const handleAddTable = () => {
+    // Offset incrementale per non sovrapporre i nuovi tavoli (item 14)
+    const newCount = tables.filter(t => t.id.startsWith('new-')).length;
+    const offset = (newCount % 8) * 30;
     const newTable: Table = {
       id: `new-${Date.now()}`,
       label: 'Nuovo Tavolo',
       roomId: selectedRoom,
-      x: 100,
-      y: 100,
+      x: 100 + offset,
+      y: 100 + offset,
       width: 100,
       height: 100,
       shape: 'square',
       seats: 4,
       status: 'free'
     };
-    // We need to save this to current state
-    saveTables([...tables, newTable]);
+    // Salva solo la nuova riga (item 6)
+    saveTable(newTable);
   };
 
   const handleSaveMasterLayout = async () => {
@@ -110,21 +113,17 @@ function App() {
   };
 
   const handleTableUpdate = (updatedTable: Table) => {
-    const newTables = tables.map(t => t.id === updatedTable.id ? updatedTable : t);
-    saveTables(newTables);
+    // Salva solo la riga modificata (item 6)
+    saveTable(updatedTable);
   };
 
   const handleTableDelete = async (tableId: string) => {
-    // 1. Delete from Supabase first
-    await StorageService.deleteTable(tableId);
-
-    // 2. Update Local State and Storage (which runs upsert, harmless for others)
-    const newTables = tables.filter(t => t.id !== tableId);
-    saveTables(newTables);
+    // Elimina la singola riga (DB + stato locale)
+    await deleteTable(tableId);
   };
 
   if (loadingTables || loadingRes) {
-    return <div className="app-container" style={{ justifyContent: 'center', alignItems: 'center' }}>Loading Data...</div>;
+    return <div className="app-container" style={{ justifyContent: 'center', alignItems: 'center' }}>Caricamento dati…</div>;
   }
 
   return (
@@ -148,18 +147,20 @@ function App() {
           </div>
 
           <div className="header-user-actions">
-            {/* Edit Switch (Desktop only usually, or small icon) */}
-            <div className="edit-switch-container desktop-only">
-              <label className="switch">
-                <input
-                  type="checkbox"
-                  checked={isEditingLayout}
-                  onChange={(e) => setIsEditingLayout(e.target.checked)}
-                />
-                <span className="slider round"></span>
-              </label>
-              <span style={{ fontSize: '0.85rem', fontWeight: 500, color: 'rgba(255,255,255,0.8)' }}>Edit</span>
-            </div>
+            {/* Edit Switch (Desktop) — solo admin può modificare il layout */}
+            {isAdmin && (
+              <div className="edit-switch-container desktop-only">
+                <label className="switch">
+                  <input
+                    type="checkbox"
+                    checked={isEditingLayout}
+                    onChange={(e) => setIsEditingLayout(e.target.checked)}
+                  />
+                  <span className="slider round"></span>
+                </label>
+                <span style={{ fontSize: '0.85rem', fontWeight: 500, color: 'rgba(255,255,255,0.8)' }}>Edit</span>
+              </div>
+            )}
 
             <button
               onClick={() => {
@@ -228,17 +229,19 @@ function App() {
             )}
           </div>
 
-          {/* Mobile Edit Switch (Hidden on Desktop) */}
-          <div className="edit-switch-container mobile-only" style={{ marginLeft: 'auto' }}>
-            <label className="switch" style={{ transform: 'scale(0.8)' }}>
-              <input
-                type="checkbox"
-                checked={isEditingLayout}
-                onChange={(e) => setIsEditingLayout(e.target.checked)}
-              />
-              <span className="slider round"></span>
-            </label>
-          </div>
+          {/* Mobile Edit Switch (Hidden on Desktop) — solo admin */}
+          {isAdmin && (
+            <div className="edit-switch-container mobile-only" style={{ marginLeft: 'auto' }}>
+              <label className="switch" style={{ transform: 'scale(0.8)' }}>
+                <input
+                  type="checkbox"
+                  checked={isEditingLayout}
+                  onChange={(e) => setIsEditingLayout(e.target.checked)}
+                />
+                <span className="slider round"></span>
+              </label>
+            </div>
+          )}
         </div>
       </header>
 
@@ -265,10 +268,9 @@ function App() {
           onTableMove={(tableId, x, y) => {
             updateTablePosition(tableId, x, y);
           }}
-          onTableDragEnd={() => {
-            // Force sync to network
-            // We can pass the whole current list including this table
-            saveTables(tables);
+          onTableDragEnd={(table) => {
+            // Persiste solo la riga spostata (item 6)
+            saveTable(table);
           }}
           isEditingLayout={isEditingLayout}
           onTableUpdate={handleTableUpdate}
@@ -288,6 +290,7 @@ function App() {
         currentDate={date}
         initialReservation={editingReservation}
         initialTableId={preSelectedTableId}
+        existingReservations={reservations}
       />
 
       <TableDetails

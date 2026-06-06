@@ -26,7 +26,10 @@ export function useReservations(date: string) {
             fetchReservations();
         });
 
-        return () => unsubscribe();
+        // Cleanup sincrono: non ritornare la Promise di removeChannel (item 9)
+        return () => {
+            unsubscribe();
+        };
     }, [fetchReservations, date]);
 
     const addReservation = async (res: Reservation) => {

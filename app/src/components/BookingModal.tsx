@@ -10,6 +10,7 @@ interface BookingModalProps {
     currentDate: string; // The date we are booking for
     initialReservation?: Reservation | null; // For editing
     initialTableId?: string | null; // For pre-filling from sidebar
+    existingReservations?: Reservation[]; // Prenotazioni del giorno (per avviso conflitti)
 }
 
 export const BookingModal: React.FC<BookingModalProps> = ({
@@ -19,7 +20,8 @@ export const BookingModal: React.FC<BookingModalProps> = ({
     tables,
     currentDate,
     initialReservation,
-    initialTableId
+    initialTableId,
+    existingReservations = []
 }) => {
     const [name, setName] = useState('');
     const [phone, setPhone] = useState('');
@@ -52,26 +54,39 @@ export const BookingModal: React.FC<BookingModalProps> = ({
         }
     }, [isOpen, initialReservation, initialTableId]);
 
+    // Avviso NON bloccante: stesso tavolo già prenotato alla stessa ora (item 13)
+    const conflicts = existingReservations.filter(r =>
+        r.id !== (initialReservation?.id ?? '') &&
+        r.time === time &&
+        r.tableIds.some(tid => selectedTableIds.includes(tid))
+    );
+
     if (!isOpen) return null;
 
     const handleSubmit = (e: React.FormEvent) => {
         e.preventDefault();
-        if (!name || !pax || !time || selectedTableIds.length === 0) {
+        if (!name.trim() || !time || selectedTableIds.length === 0) {
             setError('Compila tutti i campi obbligatori e seleziona almeno un tavolo.');
             return;
         }
 
+        // Validazione persone: deve essere un intero >= 1 (item 13)
         const paxNum = parseInt(pax, 10);
+        if (!Number.isFinite(paxNum) || paxNum < 1) {
+            setError('Inserisci un numero di persone valido (almeno 1).');
+            return;
+        }
 
         const reservationToSave: Reservation = {
             id: initialReservation ? initialReservation.id : uuidv4(), // Keep ID if editing
-            customerName: name,
+            customerName: name.trim(),
             customerPhone: phone,
             pax: paxNum,
             time,
             date: currentDate,
             tableIds: selectedTableIds,
-            notes: initialReservation?.notes || '' // Preserve notes or empty
+            notes: initialReservation?.notes || '', // Preserve notes or empty
+            orders: initialReservation?.orders || '' // Preserve orders (item 7)
         };
 
         onSave(reservationToSave);
@@ -101,6 +116,13 @@ export const BookingModal: React.FC<BookingModalProps> = ({
                 </h2>
 
                 {error && <div style={{ color: 'red', marginBottom: '10px', fontSize: '0.875rem' }}>{error}</div>}
+
+                {conflicts.length > 0 && (
+                    <div style={{ color: '#b45309', backgroundColor: '#fffbeb', border: '1px solid #fcd34d', borderRadius: '8px', padding: '8px 10px', marginBottom: '10px', fontSize: '0.85rem' }}>
+                        ⚠️ Attenzione: un tavolo selezionato risulta già prenotato alle {time}
+                        {` (${conflicts.map(c => c.customerName).join(', ')})`}. Puoi comunque salvare.
+                    </div>
+                )}
 
                 <form onSubmit={handleSubmit}>
                     <div className="form-group">

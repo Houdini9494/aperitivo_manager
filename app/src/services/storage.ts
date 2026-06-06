@@ -1,4 +1,4 @@
-import { get, set } from 'idb-keyval';
+import { get, set, del, keys } from 'idb-keyval';
 import { supabase } from './supabase';
 import type { Table, Reservation } from '../types';
 
@@ -6,7 +6,14 @@ const STORAGE_KEYS = {
     MASTER_LAYOUT: 'layout_master',
     LAYOUT_PREFIX: 'layout_',
     RESERVATIONS_PREFIX: 'reservations_',
+    PENDING: 'pending_reservations',
 };
+
+// Pending change tracking: id -> { date, op }
+// (Sostituisce i vecchi pending_upserts / pending_deletes che non avevano la data,
+//  causando prenotazioni offline che non si sincronizzavano mai — item 8.)
+type PendingOp = 'upsert' | 'delete';
+type PendingMap = Record<string, { date: string; op: PendingOp }>;
 
 // Initial Mock Data
 const DEFAULT_TABLES: Table[] = [
@@ -63,28 +70,68 @@ const DEFAULT_TABLES: Table[] = [
     })),
 ];
 
+function rowToTable(row: any): Table {
+    return {
+        id: row.id,
+        label: row.label,
+        roomId: row.room_id as any,
+        x: Number(row.x),
+        y: Number(row.y),
+        width: Number(row.width),
+        height: Number(row.height),
+        shape: row.shape,
+        seats: Number(row.seats),
+        status: row.status,
+    };
+}
+
+function tableToRow(t: Table) {
+    return {
+        id: t.id,
+        label: t.label,
+        room_id: t.roomId,
+        x: t.x,
+        y: t.y,
+        width: t.width,
+        height: t.height,
+        shape: t.shape,
+        seats: t.seats,
+        status: t.status,
+    };
+}
+
 export const StorageService = {
     // --- Layouts ---
+    // Geometria dei tavoli (condivisa fra tutti i giorni) + stato OCCUPA/LIBERA
+    // letto PER-GIORNO da table_status (item 5). Lo `status` salvato nella tabella
+    // `tables` non è più la fonte di verità.
     async getTables(date: string): Promise<Table[]> {
-        // 1. Try Supabase (Master Layout) - Treat layout as global for now to simplify multi-device sync
         try {
-            const { data, error } = await supabase.from('tables').select('*');
-            if (error) throw error;
-            if (data && data.length > 0) {
-                const mapped = data.map((row: any) => ({
-                    id: row.id,
-                    label: row.label,
-                    roomId: row.room_id as any,
-                    x: Number(row.x),
-                    y: Number(row.y),
-                    width: Number(row.width),
-                    height: Number(row.height),
-                    shape: row.shape,
-                    seats: Number(row.seats),
-                    status: row.status,
-                }));
-                // Cache locally as master and current daily
-                await set(STORAGE_KEYS.MASTER_LAYOUT, mapped);
+            const [tablesRes, statusRes] = await Promise.all([
+                supabase.from('tables').select('*'),
+                supabase.from('table_status').select('table_id, status').eq('date', date),
+            ]);
+
+            if (tablesRes.error) throw tablesRes.error;
+
+            if (tablesRes.data && tablesRes.data.length > 0) {
+                // Mappa stato per-giorno: table_id -> status
+                const statusMap = new Map<string, 'free' | 'occupied'>();
+                if (!statusRes.error && statusRes.data) {
+                    for (const s of statusRes.data as any[]) {
+                        statusMap.set(s.table_id, s.status);
+                    }
+                }
+
+                const mapped = tablesRes.data.map((row: any) => {
+                    const table = rowToTable(row);
+                    // Stato del giorno: se non c'è riga in table_status => libero
+                    table.status = statusMap.get(table.id) ?? 'free';
+                    return table;
+                });
+
+                // Cache locale (master = solo geometria, daily = con stato del giorno)
+                await set(STORAGE_KEYS.MASTER_LAYOUT, mapped.map(t => ({ ...t, status: 'free' as const })));
                 await set(`${STORAGE_KEYS.LAYOUT_PREFIX}${date}`, mapped);
                 return mapped;
             }
@@ -92,7 +139,7 @@ export const StorageService = {
             console.warn('Supabase fetch failed, falling back to local', e);
         }
 
-        // 2. Fallback to Local
+        // Fallback locale
         const dailyLayout = await get<Table[]>(`${STORAGE_KEYS.LAYOUT_PREFIX}${date}`);
         if (dailyLayout) return dailyLayout;
         const masterLayout = await get<Table[]>(STORAGE_KEYS.MASTER_LAYOUT);
@@ -100,31 +147,56 @@ export const StorageService = {
         return DEFAULT_TABLES;
     },
 
+    // Salva l'INTERO layout (geometria). Usato solo dall'admin per "Salva layout
+    // predefinito". Lo stato per-giorno NON viene toccato qui.
     async saveTables(date: string, tables: Table[], skipNetwork: boolean = false): Promise<void> {
-        // Save to Local (optimistic)
         await set(`${STORAGE_KEYS.LAYOUT_PREFIX}${date}`, tables);
         await set(STORAGE_KEYS.MASTER_LAYOUT, tables);
 
         if (skipNetwork) return;
 
-        // Sync to Supabase
         try {
-            const rows = tables.map(t => ({
-                id: t.id,
-                label: t.label,
-                room_id: t.roomId,
-                x: t.x,
-                y: t.y,
-                width: t.width,
-                height: t.height,
-                shape: t.shape,
-                seats: t.seats,
-                status: t.status,
-            }));
+            const rows = tables.map(tableToRow);
             const { error } = await supabase.from('tables').upsert(rows);
             if (error) throw error;
         } catch (e) {
             console.error('Failed to sync tables to Supabase', e);
+        }
+    },
+
+    // Semina il layout di default nel DB se è VUOTO. Va chiamata solo per gli
+    // admin (la RLS impedisce allo staff di scrivere su `tables`).
+    // Necessaria perché le scritture a singola riga + realtime, su un DB vuoto,
+    // farebbero "sparire" i tavoli non ancora persistiti.
+    async ensureLayoutSeeded(): Promise<void> {
+        try {
+            const { data, error } = await supabase.from('tables').select('id').limit(1);
+            if (error) throw error;
+            if (!data || data.length === 0) {
+                const rows = DEFAULT_TABLES.map(tableToRow);
+                const { error: upErr } = await supabase.from('tables').upsert(rows);
+                if (upErr) throw upErr;
+            }
+        } catch (e) {
+            // Per lo staff l'upsert fallisce per RLS: è atteso, ignoriamo.
+            console.warn('ensureLayoutSeeded skipped/failed', e);
+        }
+    },
+
+    // Salva/aggiorna UNA singola riga di geometria (item 6: niente più
+    // last-write-wins sull'intero array durante drag/aggiunta/modifica).
+    async saveTable(date: string, table: Table): Promise<void> {
+        // Aggiorna cache locale del giorno
+        const local = (await get<Table[]>(`${STORAGE_KEYS.LAYOUT_PREFIX}${date}`)) || [];
+        const idx = local.findIndex(t => t.id === table.id);
+        if (idx >= 0) local[idx] = table; else local.push(table);
+        await set(`${STORAGE_KEYS.LAYOUT_PREFIX}${date}`, local);
+
+        try {
+            const { error } = await supabase.from('tables').upsert(tableToRow(table));
+            if (error) throw error;
+        } catch (e) {
+            console.error('Failed to sync single table to Supabase', e);
         }
     },
 
@@ -136,9 +208,44 @@ export const StorageService = {
         try {
             const { error } = await supabase.from('tables').delete().eq('id', tableId);
             if (error) throw error;
+            // Pulisci anche eventuali stati per-giorno collegati
+            await supabase.from('table_status').delete().eq('table_id', tableId);
         } catch (e) {
             console.error('Failed to delete table from Supabase', e);
         }
+    },
+
+    // Stato OCCUPA/LIBERA per-giorno: upsert della SINGOLA riga (item 5 + 6).
+    async setTableStatus(tableId: string, date: string, status: 'free' | 'occupied'): Promise<void> {
+        // Aggiorna cache locale del giorno (optimistic)
+        const local = await get<Table[]>(`${STORAGE_KEYS.LAYOUT_PREFIX}${date}`);
+        if (local) {
+            const next = local.map(t => t.id === tableId ? { ...t, status } : t);
+            await set(`${STORAGE_KEYS.LAYOUT_PREFIX}${date}`, next);
+        }
+
+        try {
+            const { error } = await supabase
+                .from('table_status')
+                .upsert({ table_id: tableId, date, status, updated_at: new Date().toISOString() });
+            if (error) throw error;
+        } catch (e) {
+            console.error('Failed to sync table status to Supabase', e);
+        }
+    },
+
+    // --- Pending changes helpers ---
+    async getPending(): Promise<PendingMap> {
+        const pending = await get<PendingMap>(STORAGE_KEYS.PENDING);
+        if (pending) return pending;
+        // Migrazione soft: scarta i vecchi marcatori senza data (non sincronizzabili)
+        await del('pending_upserts').catch(() => {});
+        await del('pending_deletes').catch(() => {});
+        return {};
+    },
+
+    async setPending(pending: PendingMap): Promise<void> {
+        await set(STORAGE_KEYS.PENDING, pending);
     },
 
     // --- Reservations ---
@@ -173,20 +280,19 @@ export const StorageService = {
         // 2. Load Local Data
         const localData = await get<Reservation[]>(`${STORAGE_KEYS.RESERVATIONS_PREFIX}${date}`) || [];
 
-        // 3. Load Pending Changes
-        const pendingUpserts = await get<string[]>('pending_upserts') || [];
-        const pendingDeletes = await get<string[]>('pending_deletes') || [];
+        // 3. Load Pending Changes (filtra per gli id che ci interessano)
+        const pending = await this.getPending();
+        const pendingUpserts = Object.keys(pending).filter(id => pending[id].op === 'upsert');
+        const pendingDeletes = Object.keys(pending).filter(id => pending[id].op === 'delete');
 
         // 4. Merge Logic
-        let merged = remoteData || localData; // Start with Remote if available, else Local
+        let merged = remoteData || localData;
 
         if (remoteData) {
-            // If we have fresh remote data, we must re-apply our pending local changes
             // A. Remove items we deleted locally
             merged = merged.filter(r => !pendingDeletes.includes(r.id));
 
             // B. Apply items we created/updated locally
-            // We need to find the *actual* local object for these IDs
             merged = merged.map(r => {
                 if (pendingUpserts.includes(r.id)) {
                     const localVersion = localData.find(l => l.id === r.id);
@@ -201,7 +307,7 @@ export const StorageService = {
             );
             merged = [...merged, ...newLocalItems];
 
-            // D. Save this merged truth back to local storage
+            // D. Save merged truth back to local
             await set(`${STORAGE_KEYS.RESERVATIONS_PREFIX}${date}`, merged);
         }
 
@@ -217,19 +323,14 @@ export const StorageService = {
         else current.push(reservation);
         await set(key, current);
 
-        // 2. Track as Pending
-        const pendingUpserts = await get<string[]>('pending_upserts') || [];
-        if (!pendingUpserts.includes(reservation.id)) {
-            await set('pending_upserts', [...pendingUpserts, reservation.id]);
-        }
-        // Remove from deletes if it was there (undone delete)
-        const pendingDeletes = await get<string[]>('pending_deletes') || [];
-        if (pendingDeletes.includes(reservation.id)) {
-            await set('pending_deletes', pendingDeletes.filter(id => id !== reservation.id));
-        }
+        // 2. Track as Pending (con la data, così il sync funziona anche se stai
+        //    guardando un altro giorno — item 8)
+        const pending = await this.getPending();
+        pending[reservation.id] = { date: reservation.date, op: 'upsert' };
+        await this.setPending(pending);
 
-        // 3. Try Sync immediately
-        this.syncPendingChanges(reservation.date);
+        // 3. Try Sync immediately (tutte le date pendenti)
+        this.syncPendingChanges();
     },
 
     async deleteReservation(id: string, date: string): Promise<void> {
@@ -239,50 +340,43 @@ export const StorageService = {
         const filtered = current.filter(r => r.id !== id);
         await set(key, filtered);
 
-        // 2. Track as Pending Delete
-        const pendingDeletes = await get<string[]>('pending_deletes') || [];
-        if (!pendingDeletes.includes(id)) {
-            await set('pending_deletes', [...pendingDeletes, id]);
-        }
-        // Remove from upserts if present
-        const pendingUpserts = await get<string[]>('pending_upserts') || [];
-        if (pendingUpserts.includes(id)) {
-            await set('pending_upserts', pendingUpserts.filter(pid => pid !== id));
-        }
+        // 2. Track as Pending Delete (con la data)
+        const pending = await this.getPending();
+        pending[id] = { date, op: 'delete' };
+        await this.setPending(pending);
 
         // 3. Try Sync
-        this.syncPendingChanges(date);
+        this.syncPendingChanges();
     },
 
-    async syncPendingChanges(dateStr?: string) {
-        // Just a simple flush attempt. If it fails, it remains pending.
-        const pendingUpserts = await get<string[]>('pending_upserts') || [];
-        const pendingDeletes = await get<string[]>('pending_deletes') || [];
+    // Svuota TUTTE le modifiche pendenti, su TUTTE le date (item 8).
+    async syncPendingChanges() {
+        const pending = await this.getPending();
+        const ids = Object.keys(pending);
+        if (ids.length === 0) return;
 
-        if (pendingUpserts.length === 0 && pendingDeletes.length === 0) return;
-
-        // Ensure we are online-ish? Supabase call will throw if not.
         try {
-            // Process Deletes
-            for (const id of pendingDeletes) {
-                const { error } = await supabase.from('reservations').delete().eq('id', id);
-                if (!error) {
-                    const freshDeletes = await get<string[]>('pending_deletes') || [];
-                    await set('pending_deletes', freshDeletes.filter(d => d !== id));
-                }
-            }
+            for (const id of ids) {
+                const entry = pending[id];
 
-            // Process Upserts
-            // We need to find the data. Since we don't store date in pending list efficiently yet,
-            // we rely on the passed `dateStr` or we scan?
-            // For MVP, we pass `dateStr` from the save call context. 
-            // If we are just "coming online" without a specific date context, we might miss syncing until that date is opened.
-            // This is an acceptable tradeoff for now to avoid scanning ALL local keys.
-            if (dateStr && pendingUpserts.length > 0) {
-                const localData = await get<Reservation[]>(`${STORAGE_KEYS.RESERVATIONS_PREFIX}${dateStr}`) || [];
-                const toSync = localData.filter(r => pendingUpserts.includes(r.id));
-
-                for (const r of toSync) {
+                if (entry.op === 'delete') {
+                    const { error } = await supabase.from('reservations').delete().eq('id', id);
+                    if (!error) {
+                        const fresh = await this.getPending();
+                        delete fresh[id];
+                        await this.setPending(fresh);
+                    }
+                } else {
+                    // upsert: ricava il dato dalla cache locale della sua data
+                    const localData = await get<Reservation[]>(`${STORAGE_KEYS.RESERVATIONS_PREFIX}${entry.date}`) || [];
+                    const r = localData.find(x => x.id === id);
+                    if (!r) {
+                        // Dato locale non più presente: rimuovi il pending orfano
+                        const fresh = await this.getPending();
+                        delete fresh[id];
+                        await this.setPending(fresh);
+                        continue;
+                    }
                     const row = {
                         id: r.id,
                         customer_name: r.customerName,
@@ -296,14 +390,14 @@ export const StorageService = {
                     };
                     const { error } = await supabase.from('reservations').upsert(row);
                     if (!error) {
-                        const freshUpserts = await get<string[]>('pending_upserts') || [];
-                        await set('pending_upserts', freshUpserts.filter(u => u !== r.id));
+                        const fresh = await this.getPending();
+                        delete fresh[id];
+                        await this.setPending(fresh);
                     }
                 }
             }
-
-        } catch (e) {
-            // Still offline, ignore.
+        } catch {
+            // Ancora offline: i pending restano per il prossimo tentativo.
             console.log('Sync attempt failed (Offline)');
         }
     },
@@ -318,11 +412,16 @@ export const StorageService = {
         return { unsubscribe: () => supabase.removeChannel(channel) };
     },
 
+    subscribeToTableStatus(date: string, callback: () => void) {
+        const channel = supabase.channel(`public:table_status:${date}`)
+            .on('postgres_changes', { event: '*', schema: 'public', table: 'table_status', filter: `date=eq.${date}` }, () => {
+                callback();
+            })
+            .subscribe();
+        return { unsubscribe: () => supabase.removeChannel(channel) };
+    },
+
     subscribeToReservations(date: string, callback: () => void) {
-        // Filter by date not supported directly in filter string for all events simply, 
-        // but we can filter client side or just listen to all reservations and check date?
-        // 'filter' in postgres_changes accepts simple equality. `date=eq.${date}` should work.
-        // However, date is a text column in my schema.
         const channel = supabase.channel(`public:reservations:${date}`)
             .on('postgres_changes', { event: '*', schema: 'public', table: 'reservations', filter: `date=eq.${date}` }, () => {
                 callback();
@@ -333,44 +432,40 @@ export const StorageService = {
 
     // --- Maintenance ---
     async resetLayout(date: string): Promise<void> {
-        // 1. Clear Supabase tables (delete all)
         try {
-            // We can delete by matching all room_ids since we know them
             await supabase.from('tables').delete().in('room_id', ['internal', 'external']);
         } catch (e) {
             console.error('Failed to clear Supabase tables', e);
         }
-
-        // 2. Overwrite with defaults (Local + Supabase via saveTables)
         await this.saveTables(date, DEFAULT_TABLES);
     },
 
-    async cleanOldData(): Promise<void> {
+    // Manutenzione LOCALE: rimuove dall'IndexedDB le chiavi più vecchie della
+    // retention così lo storage del tablet non cresce all'infinito (item 15).
+    // La cancellazione lato server è gestita da cleanup_old_reservations()
+    // schedulata in Supabase (vedi SECURITY_DB.sql) — NON più dal client (item 4).
+    async cleanOldData(retentionDays: number = 30): Promise<void> {
         try {
-            // Keep reservations from today onwards
-            // Everything BEFORE today (YYYY-MM-DD) is considered "old" and deletable?
-            // User requested "automatic cleanup". 
-            // Let's decide a safe policy: Keep last 7 days history, delete older.
-            // Or strictly: delete everything < today?
-            // Usually restaurants might want history. Let's assume 30 days retention.
-            const today = new Date();
-            const retentionDate = new Date(today);
-            retentionDate.setDate(today.getDate() - 30);
-            const retentionStr = retentionDate.toISOString().split('T')[0];
+            const cutoff = new Date();
+            cutoff.setDate(cutoff.getDate() - retentionDays);
+            const cutoffStr = cutoff.toISOString().split('T')[0];
 
-            console.log('Running Auto-Cleanup for reservations older than:', retentionStr);
+            const allKeys = (await keys()) as string[];
 
-            const { error, count } = await supabase
-                .from('reservations')
-                .delete({ count: 'exact' })
-                .lt('date', retentionStr); // Delete where date < retentionStr
+            for (const k of allKeys) {
+                if (typeof k !== 'string') continue;
+                const isReservation = k.startsWith(STORAGE_KEYS.RESERVATIONS_PREFIX);
+                const isLayout = k.startsWith(STORAGE_KEYS.LAYOUT_PREFIX) && k !== STORAGE_KEYS.MASTER_LAYOUT;
+                if (!isReservation && !isLayout) continue;
 
-            if (error) throw error;
-            if (count && count > 0) {
-                console.log(`Auto-Cleanup: Deleted ${count} old reservations.`);
+                const datePart = k.substring(k.indexOf('_') + 1);
+                // Solo chiavi con data valida YYYY-MM-DD anteriore al cutoff
+                if (/^\d{4}-\d{2}-\d{2}$/.test(datePart) && datePart < cutoffStr) {
+                    await del(k);
+                }
             }
         } catch (e) {
-            console.error('Failed to clean old data', e);
+            console.error('Failed to clean old local data', e);
         }
     }
 };
