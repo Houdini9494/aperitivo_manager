@@ -47,10 +47,14 @@ $$;
 -- ----------------------------------------------------------------------------
 alter table public.profiles enable row level security;
 
--- SELECT pubblico già esistente in SETUP_DB.sql; lo ricreiamo idempotente.
+-- SELECT solo per utenti AUTENTICATI: la versione precedente (using true,
+-- senza "to authenticated") esponeva id utente e ruoli a chiunque avesse la
+-- anon key. L'app legge profiles solo dopo il login, quindi è sicuro.
 drop policy if exists "Public profiles are viewable by everyone." on public.profiles;
-create policy "Public profiles are viewable by everyone."
+drop policy if exists "Profiles are viewable by authenticated users." on public.profiles;
+create policy "Profiles are viewable by authenticated users."
   on public.profiles for select
+  to authenticated
   using ( true );
 
 drop policy if exists "Users can insert their own profile." on public.profiles;
@@ -62,6 +66,7 @@ create policy "Users can insert their own profile."
 -- (role deve restare uguale a quello attualmente memorizzato.)
 -- L'assegnazione/cambio di ruolo si fa da dashboard Supabase o da un admin.
 drop policy if exists "Users can update own profile." on public.profiles;
+drop policy if exists "Users can update own profile (no role change)." on public.profiles;
 create policy "Users can update own profile (no role change)."
   on public.profiles for update
   using ( auth.uid() = id )

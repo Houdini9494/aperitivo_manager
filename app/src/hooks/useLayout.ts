@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import type { Table } from '../types';
 import { StorageService } from '../services/storage';
 
@@ -19,12 +19,17 @@ export function useLayout(date: string, isAdmin: boolean = false) {
     const [tables, setTables] = useState<Table[]>([]);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState<Error | null>(null);
+    // Ultima data già caricata: i refetch innescati dal realtime sulla stessa
+    // data NON devono rimettere loading=true (farebbe lampeggiare l'intera UI
+    // su tutti i tablet a ogni OCCUPA/LIBERA altrui).
+    const loadedDateRef = useRef<string | null>(null);
 
     const fetchTables = useCallback(async () => {
         try {
-            setLoading(true);
+            if (loadedDateRef.current !== date) setLoading(true);
             const data = await StorageService.getTables(date);
             setTables(data);
+            loadedDateRef.current = date;
         } catch (err) {
             setError(err as Error);
         } finally {

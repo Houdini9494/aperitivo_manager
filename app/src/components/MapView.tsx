@@ -61,6 +61,13 @@ export const MapView: React.FC<MapViewProps> = ({
         e.preventDefault(); // Prevent text selection/scrolling
         e.stopPropagation(); // Let it bubble if needed? Better to stop to prevent map panning if we had it.
 
+        // Cattura il puntatore: così il pointerup arriva SEMPRE a questo nodo,
+        // anche se il rilascio avviene fuori dal tavolo (drag veloce su tablet).
+        // Senza capture lo spostamento veniva scartato senza essere salvato.
+        try {
+            e.currentTarget.setPointerCapture(e.pointerId);
+        } catch { /* capture non supportata: persiste comunque il fallback su window */ }
+
         const canvas = canvasRef.current;
         if (!canvas) return;
 
@@ -112,13 +119,6 @@ export const MapView: React.FC<MapViewProps> = ({
         e.stopPropagation();
     };
 
-    const handleContainerPointerUp = () => {
-        // Just reset drag state if we released on container
-        setDraggingTableId(null);
-        setInitialPointerDownPos(null);
-        setIsDragging(false);
-    };
-
     // Zoom Logic
     const handleWheel = (e: React.WheelEvent) => {
         // Trackpad pinch usually fires wheel event with ctrlKey
@@ -167,9 +167,16 @@ export const MapView: React.FC<MapViewProps> = ({
     // But strictly using React events on container usually works if capture is set or just on container.
     // Actually, setting specific listeners on window is better for reliable drag.
     useEffect(() => {
-        const handleWindowPointerUp = () => {
-            // If a drag was initiated and then pointerup happened outside, clear dragging state
+        const endDrag = () => {
+            // Rilascio fuori dal nodo del tavolo (capture fallita o pointercancel):
+            // persisti comunque lo spostamento prima di azzerare lo stato di drag.
+            // Il caso normale (rilascio sul tavolo) è gestito da handleTablePointerUp,
+            // che ferma la propagazione: qui non si arriva, niente doppio salvataggio.
             if (draggingTableId) {
+                if (isDragging) {
+                    const moved = tables.find(t => t.id === draggingTableId);
+                    if (moved) onTableDragEnd?.(moved);
+                }
                 setDraggingTableId(null);
                 setInitialPointerDownPos(null);
                 setIsDragging(false);
@@ -200,15 +207,17 @@ export const MapView: React.FC<MapViewProps> = ({
         };
 
         if (draggingTableId) {
-            window.addEventListener('pointerup', handleWindowPointerUp);
+            window.addEventListener('pointerup', endDrag);
+            window.addEventListener('pointercancel', endDrag);
             window.addEventListener('pointermove', handleWindowPointerMove);
         }
 
         return () => {
-            window.removeEventListener('pointerup', handleWindowPointerUp);
+            window.removeEventListener('pointerup', endDrag);
+            window.removeEventListener('pointercancel', endDrag);
             window.removeEventListener('pointermove', handleWindowPointerMove);
         };
-    }, [draggingTableId, dragOffset, initialPointerDownPos, onTableMove, zoom]); // Re-bind when dragging starts or initial pos changes
+    }, [draggingTableId, dragOffset, initialPointerDownPos, onTableMove, zoom, isDragging, tables, onTableDragEnd]); // Re-bind when dragging starts or initial pos changes
 
     // Prevent default gesture behaviors on the container to allow custom zoom
     useEffect(() => {
@@ -246,7 +255,6 @@ export const MapView: React.FC<MapViewProps> = ({
                 placeItems: 'center',     // Center content
                 touchAction: 'pan-x pan-y' // Allow native scrolling, but we handle pinch via JS
             }}
-            onPointerUp={handleContainerPointerUp} // Attach to container for general up detection
             onWheel={handleWheel}
             onTouchStart={handleTouchStart}
             onTouchMove={handleTouchMove}
